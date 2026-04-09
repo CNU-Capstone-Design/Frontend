@@ -47,7 +47,7 @@ export function Workspace() {
   );
   const [modifications, setModifications] = useState<Modification[]>([]);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
-  const [showMasks, setShowMasks] = useState(true);
+  const [showMasks, setShowMasks] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(!id);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
@@ -104,52 +104,54 @@ export function Workspace() {
     }
   };
 
-  // 파일 선택 시 state에만 저장 (비밀번호 입력 대기)
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) setPendingFile(file);
   };
 
+  // ✅ 여기가 핵심 수정 부분
   const handleImageUpload = async () => {
     if (!pendingFile) return;
 
-    // 갤러리 잠금 해제(암호화 비밀번호 입력) 없이는 업로드 불가
     if (!getEncryptionPassword()) {
       toast.error('먼저 갤러리에서 암호화 비밀번호를 입력해주세요.');
       navigate('/');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const imageData = e.target?.result as string;
-      setIsProcessing(true);
+    setIsProcessing(true);
 
-      const result = await parseFace(imageData);
+    try {
+      // 1. 백엔드에 업로드 (EXIF 보정 후 저장됨)
+      const formData = new FormData();
+      formData.append('file', pendingFile);
+      const res = await api.upload<{ image_id: string }>('/images/upload', formData);
+      setImageId(res.image_id);
+
+      // 2. 백엔드에서 보정된 이미지 받아오기 (EXIF 제거된 버전)
+      const imageRes = await api.get<{ data_url: string }>(`/images/${res.image_id}/base64`);
+      const correctedImageData = imageRes.data_url;
+
+      // 3. 얼굴 파싱
+      const result = await parseFace(correctedImageData);
       if (!result.success) {
-        setIsProcessing(false);
         setErrorMessage(result.message || '얼굴을 인식할 수 없습니다.');
         setShowErrorDialog(true);
         return;
       }
 
-      try {
-        const formData = new FormData();
-        formData.append('file', pendingFile);
-        const res = await api.upload<{ image_id: string }>('/images/upload', formData);
-        setImageId(res.image_id);
-      } catch (err: any) {
-        console.warn('이미지 백엔드 업로드 실패:', err.message);
-      }
-
-      setOriginalImage(imageData);
-      setResultImage(imageData);
+      // 4. 보정된 이미지로 화면 표시
+      setOriginalImage(correctedImageData);
+      setResultImage(correctedImageData);
       setShowUploadDialog(false);
-      setIsProcessing(false);
       setPendingFile(null);
       toast.success('얼굴 파싱이 완료되었습니다');
-    };
-    reader.readAsDataURL(pendingFile);
+
+    } catch (err: any) {
+      toast.error(err.message ?? '업로드에 실패했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handlePartToggle = (partId: string) => {
@@ -221,7 +223,6 @@ export function Workspace() {
     }
   };
 
-  // 기존 시뮬레이션 편집인데 이미지가 없으면 → 비밀번호 오류
   if (id && simulation && !originalImage) {
     return <EncryptedImageGuard />;
   }
@@ -276,7 +277,7 @@ export function Workspace() {
       {/* Main Workspace */}
       <main className="max-w-[1800px] mx-auto px-6 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-140px)]">
-          {/* Left: Original Image with Masks */}
+          {/* Left: Original Image */}
           <Card className="lg:col-span-1">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -299,6 +300,7 @@ export function Workspace() {
                     src={originalImage}
                     alt="Original"
                     className="w-full h-full object-contain"
+                    style={{ imageOrientation: 'none' }}
                   />
                   <canvas
                     ref={canvasRef}
@@ -322,7 +324,6 @@ export function Workspace() {
               <CardTitle className="text-lg">부위 선택 및 조절</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Face Parts Selection */}
               <div>
                 <Label className="mb-3 block">얼굴 부위 선택</Label>
                 <div className="space-y-2">
@@ -354,7 +355,6 @@ export function Workspace() {
                 </div>
               </div>
 
-              {/* Modification Controls */}
               {selectedPart && selectedPartData && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
@@ -371,7 +371,6 @@ export function Workspace() {
                     </h3>
                   </div>
 
-                  {/* Reference Image Upload */}
                   <div>
                     <Label className="mb-2 block text-sm">참조 이미지 업로드</Label>
                     {selectedModification?.referenceImage ? (
@@ -414,7 +413,6 @@ export function Workspace() {
                     )}
                   </div>
 
-                  {/* Intensity Slider */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <Label className="text-sm">적용 강도</Label>
@@ -447,6 +445,7 @@ export function Workspace() {
                     src={resultImage}
                     alt="Result"
                     className="w-full h-full object-contain"
+                    style={{ imageOrientation: 'none' }}
                   />
                   <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
                     실시간 프리뷰
@@ -475,7 +474,6 @@ export function Workspace() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* 파일 선택 */}
             <label className="block">
               <input
                 type="file"
@@ -577,10 +575,10 @@ export function Workspace() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleImageUpload}
+                  onChange={handleFileSelect}
                   className="hidden"
                 />
-                <Button className="w-full">
+                <Button className="w-full" onClick={handleImageUpload}>
                   다시 시도
                 </Button>
               </label>

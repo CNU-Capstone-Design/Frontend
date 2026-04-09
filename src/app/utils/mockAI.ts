@@ -86,11 +86,9 @@ export function generateMockMask(
       break;
     case 'nose':
       // Nose
+      // Nose - 삼각형 대신 타원으로 변경
       ctx.beginPath();
-      ctx.moveTo(centerX, centerY - height * 0.05);
-      ctx.lineTo(centerX - width * 0.05, centerY + height * 0.08);
-      ctx.lineTo(centerX + width * 0.05, centerY + height * 0.08);
-      ctx.closePath();
+      ctx.ellipse(centerX, centerY + height * 0.02, width * 0.06, height * 0.08, 0, 0, Math.PI * 2);
       ctx.fill();
       break;
     case 'mouth_upper':

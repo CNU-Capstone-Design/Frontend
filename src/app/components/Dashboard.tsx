@@ -194,11 +194,11 @@ export function Dashboard() {
                     {sim.originalImage ? (
                       <div className="absolute inset-0 flex">
                         <div className="flex-1 relative">
-                          <img src={sim.originalImage} alt="Before" className="w-full h-full object-cover" />
+                          <img src={sim.originalImage} alt="Before" className="w-full h-full object-cover" style={{ imageOrientation: 'none' }} />
                           <div className="absolute top-2 left-2 bg-slate-900/70 text-white text-xs px-2 py-1 rounded">Before</div>
                         </div>
                         <div className="flex-1 relative">
-                          <img src={sim.resultImage} alt="After" className="w-full h-full object-cover" />
+                          <img src={sim.resultImage} alt="After" className="w-full h-full object-cover" style={{ imageOrientation: 'none' }} />
                           <div className="absolute top-2 right-2 bg-blue-600/90 text-white text-xs px-2 py-1 rounded">After</div>
                         </div>
                       </div>
