@@ -16,7 +16,7 @@ export default defineConfig({
   // --- 여기서부터 추가 ---
   server: {
     allowedHosts: [
-      '2d39-2406-da12-16a-fe00-6700-87d-cba6-7968.ngrok-free.app'
+      'unidealistic-synthia-cataclysmically.ngrok-free.dev'
     ]
   },
   // --- 여기까지 추가 ---

@@ -51,6 +51,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(encHeader ? { "X-Encryption-Password": encHeader } : {}),
+    "ngrok-skip-browser-warning": "1",
     ...(options.headers as Record<string, string>),
   };
 
