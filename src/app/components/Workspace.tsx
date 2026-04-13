@@ -23,7 +23,7 @@ import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import { FACE_PARTS, FacePart, Simulation, Modification } from '../types/simulation';
 import { getSimulation, saveSimulation } from '../utils/storage';
-import { parseFace, generateMockMask } from '../utils/mockAI';
+import { parseFace } from '../utils/mockAI';
 import { EncryptedImageGuard } from './EncryptedImageGuard';
 import {
   Dialog,
@@ -48,6 +48,8 @@ export function Workspace() {
   const [modifications, setModifications] = useState<Modification[]>([]);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [showMasks, setShowMasks] = useState(false);
+  const [segmentMasks, setSegmentMasks] = useState<Record<string, string> | null>(null);
+  const [isFetchingMasks, setIsFetchingMasks] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(!id);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
@@ -72,35 +74,93 @@ export function Workspace() {
     }
   }, [id]);
 
+  // 프론트 FacePart id → 모델 region 이름 매핑
+  const PART_TO_REGION: Record<string, string> = {
+    skin:        'skin',
+    eyebrowL:    'brow',
+    eyebrowR:    'brow',
+    eyeL:        'eye',
+    eyeR:        'eye',
+    nose:        'nose',
+    mouthUpper:  'mouth',
+    mouthLower:  'mouth',
+    faceOutline: 'skin',
+  };
+
   useEffect(() => {
     if (originalImage && canvasRef.current && originalImageRef.current) {
       const img = originalImageRef.current;
-      img.onload = () => {
-        drawMasks();
-      };
+      if (img.complete) drawMasks();
+      else img.onload = () => drawMasks();
     }
-  }, [originalImage, faceParts, showMasks]);
+  }, [originalImage, faceParts, showMasks, segmentMasks, selectedPart]);
 
   const drawMasks = () => {
     if (!canvasRef.current || !originalImageRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const img = originalImageRef.current;
-    
-    canvas.width = img.width;
-    canvas.height = img.height;
-    
+    canvas.width  = img.naturalWidth  || img.width;
+    canvas.height = img.naturalHeight || img.height;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    if (showMasks) {
-      faceParts.forEach(part => {
-        if (part.selected || selectedPart === part.id) {
-          generateMockMask(canvas, part.id, canvas.width, canvas.height);
+
+    if (!showMasks || !segmentMasks) return;
+
+    const partsToShow = faceParts.filter(p => p.selected || p.id === selectedPart);
+
+    partsToShow.forEach(part => {
+      const regionName = PART_TO_REGION[part.id];
+      const maskB64 = segmentMasks[regionName];
+      if (!maskB64) return;
+
+      const maskImg = new Image();
+      maskImg.onload = () => {
+        // 오프스크린 캔버스로 마스크 픽셀 읽기
+        const offscreen = document.createElement('canvas');
+        offscreen.width  = canvas.width;
+        offscreen.height = canvas.height;
+        const offCtx = offscreen.getContext('2d')!;
+        offCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+
+        const maskData = offCtx.getImageData(0, 0, canvas.width, canvas.height);
+        const overlay  = ctx.createImageData(canvas.width, canvas.height);
+
+        // part.color hex → RGB
+        const hex = part.color.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+
+        for (let i = 0; i < maskData.data.length; i += 4) {
+          if (maskData.data[i] > 128) {         // 마스크 ON 픽셀
+            overlay.data[i]     = r;
+            overlay.data[i + 1] = g;
+            overlay.data[i + 2] = b;
+            overlay.data[i + 3] = 140;          // 반투명 오버레이
+          }
         }
-      });
+        ctx.putImageData(overlay, 0, 0);
+      };
+      maskImg.src = `data:image/png;base64,${maskB64}`;
+    });
+  };
+
+  const handleMaskToggle = async (checked: boolean) => {
+    setShowMasks(checked);
+    if (!checked || !imageId || segmentMasks) return;
+
+    setIsFetchingMasks(true);
+    try {
+      const res = await api.get<{ masks: Record<string, string> }>(`/images/${imageId}/segment`);
+      setSegmentMasks(res.masks);
+    } catch (err: any) {
+      toast.error(err.message ?? '마스크를 불러올 수 없습니다. 인퍼런스 서버가 켜져 있는지 확인하세요.');
+      setShowMasks(false);
+    } finally {
+      setIsFetchingMasks(false);
     }
   };
 
@@ -284,11 +344,15 @@ export function Workspace() {
                 <CardTitle className="text-lg">원본 이미지</CardTitle>
                 <div className="flex items-center gap-2">
                   <Label htmlFor="mask-toggle" className="text-sm cursor-pointer">마스크</Label>
-                  <Switch
-                    id="mask-toggle"
-                    checked={showMasks}
-                    onCheckedChange={setShowMasks}
-                  />
+                  {isFetchingMasks
+                    ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    : <Switch
+                        id="mask-toggle"
+                        checked={showMasks}
+                        onCheckedChange={handleMaskToggle}
+                        disabled={!imageId}
+                      />
+                  }
                 </div>
               </div>
             </CardHeader>
