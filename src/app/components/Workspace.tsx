@@ -163,8 +163,19 @@ export function Workspace() {
 
     setIsFetchingMasks(true);
     try {
-      const res = await api.get<{ masks: Record<string, string> }>(`/images/${imageId}/segment`);
+      const res = await api.get<{
+        masks: Record<string, string>;
+        aligned_image: string | null;
+      }>(`/images/${imageId}/segment`);
+
       setSegmentMasks(res.masks);
+
+      // FFHQ aligned 이미지로 원본 패널 교체 → 마스크와 정렬 맞춤
+      if (res.aligned_image) {
+        const alignedDataUrl = `data:image/jpeg;base64,${res.aligned_image}`;
+        setOriginalImage(alignedDataUrl);
+        if (resultImage === originalImage) setResultImage(alignedDataUrl);
+      }
     } catch (err: any) {
       toast.error(err.message ?? '마스크를 불러올 수 없습니다. 인퍼런스 서버가 켜져 있는지 확인하세요.');
       setShowMasks(false);
