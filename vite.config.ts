@@ -17,7 +17,13 @@ export default defineConfig({
   server: {
     allowedHosts: [
       'unidealistic-synthia-cataclysmically.ngrok-free.dev'
-    ]
+    ],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+      }
+    }
   },
   // --- 여기까지 추가 ---
   assetsInclude: ['**/*.svg', '**/*.csv'],
