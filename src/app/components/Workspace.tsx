@@ -51,6 +51,8 @@ export function Workspace() {
   const [segmentMasks, setSegmentMasks] = useState<Record<string, string> | null>(null);
   const [isFetchingMasks, setIsFetchingMasks] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showUploadDialog, setShowUploadDialog] = useState(!id);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -232,35 +234,94 @@ export function Workspace() {
 
   const handleIntensityChange = (value: number[]) => {
     if (!selectedPart) return;
-    
     setModifications(mods => {
       const existing = mods.find(m => m.partId === selectedPart);
-      if (existing) {
-        return mods.map(m =>
-          m.partId === selectedPart ? { ...m, intensity: value[0] } : m
-        );
+      const updatedMods = existing
+        ? mods.map(m => m.partId === selectedPart ? { ...m, intensity: value[0] } : m)
+        : [...mods, { partId: selectedPart, intensity: value[0] }];
+      // 참조 이미지가 있을 때만 디바운스 프리뷰
+      if (updatedMods.find(m => m.partId === selectedPart)?.referenceImage) {
+        triggerPreviewDebounced(updatedMods);
       }
-      return [...mods, { partId: selectedPart, intensity: value[0] }];
+      return updatedMods;
     });
+  };
+
+  // ── 실시간 AI 프리뷰 ────────────────────────────────────
+  const MAX_DONORS = 3;
+
+  /** 현재 선택된 부위 + 참조 이미지 기준으로 swap 프리뷰를 요청합니다. */
+  const triggerPreview = async (updatedMods?: Modification[]) => {
+    if (!imageId) return;
+    const mods = updatedMods ?? modifications;
+
+    // 선택된 부위 중 참조 이미지가 있는 것만 수집
+    const regionDonors: Record<string, { image: string; intensity: number }> = {};
+    for (const mod of mods) {
+      const part = faceParts.find(p => p.id === mod.partId && p.selected);
+      if (part && mod.referenceImage) {
+        // data URL → base64 only
+        const b64 = mod.referenceImage.includes(',')
+          ? mod.referenceImage.split(',')[1]
+          : mod.referenceImage;
+        regionDonors[mod.partId] = {
+          image:     b64,
+          intensity: (mod.intensity ?? 85) / 100,
+        };
+      }
+    }
+
+    if (Object.keys(regionDonors).length === 0) {
+      setResultImage(originalImage);
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    try {
+      const res = await api.post<{ result: string; similarity_score: number | null }>(
+        '/simulate/preview',
+        { image_id: imageId, region_donors: regionDonors },
+      );
+      setResultImage(`data:image/jpeg;base64,${res.result}`);
+    } catch (err: any) {
+      toast.error(err.message ?? 'AI 프리뷰에 실패했습니다.');
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  /** intensity 슬라이더용 디바운스 프리뷰 (300ms) */
+  const triggerPreviewDebounced = (updatedMods: Modification[]) => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => triggerPreview(updatedMods), 300);
   };
 
   const handleReferenceUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !selectedPart) return;
 
+    // 최대 3개 제한 — 이미 이 부위에 donor 가 있으면 교체이므로 허용
+    const donorCount = modifications.filter(
+      m => m.referenceImage && m.partId !== selectedPart &&
+           faceParts.find(p => p.id === m.partId && p.selected)
+    ).length;
+    if (donorCount >= MAX_DONORS) {
+      toast.error(`최대 ${MAX_DONORS}개의 부위만 동시에 수정할 수 있습니다.`);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const imageData = e.target?.result as string;
       setModifications(mods => {
         const existing = mods.find(m => m.partId === selectedPart);
-        if (existing) {
-          return mods.map(m =>
-            m.partId === selectedPart ? { ...m, referenceImage: imageData } : m
-          );
-        }
-        return [...mods, { partId: selectedPart, intensity: 50, referenceImage: imageData }];
+        const updatedMods = existing
+          ? mods.map(m => m.partId === selectedPart ? { ...m, referenceImage: imageData } : m)
+          : [...mods, { partId: selectedPart, intensity: 85, referenceImage: imageData }];
+        triggerPreview(updatedMods);
+        return updatedMods;
       });
-      toast.success('참조 이미지가 업로드되었습니다');
+      toast.success('참조 이미지 업로드됨 — AI 처리 중...');
     };
     reader.readAsDataURL(file);
   };
@@ -456,13 +517,15 @@ export function Workspace() {
                           variant="destructive"
                           className="absolute top-2 right-2"
                           onClick={() => {
-                            setModifications(mods =>
-                              mods.map(m =>
+                            setModifications(mods => {
+                              const updatedMods = mods.map(m =>
                                 m.partId === selectedPart
                                   ? { ...m, referenceImage: undefined }
                                   : m
-                              )
-                            );
+                              );
+                              triggerPreview(updatedMods);
+                              return updatedMods;
+                            });
                           }}
                         >
                           <X className="w-3 h-3" />
@@ -515,12 +578,21 @@ export function Workspace() {
                   <img
                     src={resultImage}
                     alt="Result"
-                    className="w-full h-full object-contain"
+                    className={`w-full h-full object-contain transition-opacity duration-200 ${isPreviewLoading ? 'opacity-40' : 'opacity-100'}`}
                     style={{ imageOrientation: 'none' }}
                   />
-                  <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                    실시간 프리뷰
-                  </div>
+                  {isPreviewLoading ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="bg-white/80 rounded-xl px-4 py-3 flex items-center gap-2 shadow">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                        <span className="text-sm text-slate-700">AI 처리 중...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                      실시간 프리뷰
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="aspect-[3/4] bg-slate-100 rounded-lg flex items-center justify-center">
