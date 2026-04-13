@@ -22,14 +22,14 @@ export interface Modification {
   intensity: number;
 }
 
+// id 가 모델 region 이름과 1:1 대응 (skin/brow/eye/nose/mouth/hair/ear/neck)
 export const FACE_PARTS: Omit<FacePart, 'selected'>[] = [
-  { id: 'skin', name: '피부', color: 'rgba(255, 200, 200, 0.3)' },
-  { id: 'eyebrow_left', name: '왼쪽 눈썹', color: 'rgba(139, 69, 19, 0.4)' },
-  { id: 'eyebrow_right', name: '오른쪽 눈썹', color: 'rgba(160, 82, 45, 0.4)' },
-  { id: 'eye_left', name: '왼쪽 눈', color: 'rgba(100, 149, 237, 0.4)' },
-  { id: 'eye_right', name: '오른쪽 눈', color: 'rgba(65, 105, 225, 0.4)' },
-  { id: 'nose', name: '코', color: 'rgba(255, 228, 196, 0.4)' },
-  { id: 'mouth_upper', name: '윗입술', color: 'rgba(255, 105, 180, 0.4)' },
-  { id: 'mouth_lower', name: '아랫입술', color: 'rgba(255, 20, 147, 0.4)' },
-  { id: 'face_outline', name: '얼굴 윤곽', color: 'rgba(255, 215, 0, 0.3)' },
+  { id: 'skin',  name: '피부',      color: '#f4a261' },
+  { id: 'brow',  name: '눈썹',      color: '#8b4513' },
+  { id: 'eye',   name: '눈',        color: '#4169e1' },
+  { id: 'nose',  name: '코',        color: '#e9c46a' },
+  { id: 'mouth', name: '입',        color: '#e63946' },
+  { id: 'hair',  name: '머리카락',  color: '#6d4c41' },
+  { id: 'ear',   name: '귀',        color: '#f48fb1' },
+  { id: 'neck',  name: '목',        color: '#a8dadc' },
 ];

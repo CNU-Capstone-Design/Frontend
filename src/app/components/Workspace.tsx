@@ -74,17 +74,16 @@ export function Workspace() {
     }
   }, [id]);
 
-  // 프론트 FacePart id → 모델 region 이름 매핑
+  // FacePart id 가 모델 region 이름과 동일하므로 그대로 사용
   const PART_TO_REGION: Record<string, string> = {
-    skin:        'skin',
-    eyebrowL:    'brow',
-    eyebrowR:    'brow',
-    eyeL:        'eye',
-    eyeR:        'eye',
-    nose:        'nose',
-    mouthUpper:  'mouth',
-    mouthLower:  'mouth',
-    faceOutline: 'skin',
+    skin:  'skin',
+    brow:  'brow',
+    eye:   'eye',
+    nose:  'nose',
+    mouth: 'mouth',
+    hair:  'hair',
+    ear:   'ear',
+    neck:  'neck',
   };
 
   useEffect(() => {
@@ -95,57 +94,65 @@ export function Workspace() {
     }
   }, [originalImage, faceParts, showMasks, segmentMasks, selectedPart]);
 
-  const drawMasks = () => {
+  const drawMasks = async () => {
     if (!canvasRef.current || !originalImageRef.current) return;
 
     const canvas = canvasRef.current;
-    const img = originalImageRef.current;
-    canvas.width  = img.naturalWidth  || img.width;
-    canvas.height = img.naturalHeight || img.height;
+    const img    = originalImageRef.current;
+    const W      = img.naturalWidth  || img.width  || 256;
+    const H      = img.naturalHeight || img.height || 256;
+    canvas.width  = W;
+    canvas.height = H;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, W, H);
 
     if (!showMasks || !segmentMasks) return;
 
     const partsToShow = faceParts.filter(p => p.selected || p.id === selectedPart);
 
-    partsToShow.forEach(part => {
+    for (const part of partsToShow) {
       const regionName = PART_TO_REGION[part.id];
-      const maskB64 = segmentMasks[regionName];
-      if (!maskB64) return;
+      const maskB64    = segmentMasks[regionName];
+      if (!maskB64) continue;
 
-      const maskImg = new Image();
-      maskImg.onload = () => {
-        // 오프스크린 캔버스로 마스크 픽셀 읽기
-        const offscreen = document.createElement('canvas');
-        offscreen.width  = canvas.width;
-        offscreen.height = canvas.height;
-        const offCtx = offscreen.getContext('2d')!;
-        offCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+      await new Promise<void>(resolve => {
+        const maskImg = new window.Image();
+        maskImg.onload = () => {
+          // 오프스크린에 마스크 그리기
+          const off    = document.createElement('canvas');
+          off.width    = W;
+          off.height   = H;
+          const offCtx = off.getContext('2d')!;
+          offCtx.drawImage(maskImg, 0, 0, W, H);
 
-        const maskData = offCtx.getImageData(0, 0, canvas.width, canvas.height);
-        const overlay  = ctx.createImageData(canvas.width, canvas.height);
+          // 마스크 픽셀 → part color 로 채운 오버레이 생성
+          const maskPx  = offCtx.getImageData(0, 0, W, H);
+          const overlay = offCtx.createImageData(W, H);
+          const hex = part.color.replace('#', '');
+          const r = parseInt(hex.slice(0, 2), 16);
+          const g = parseInt(hex.slice(2, 4), 16);
+          const b = parseInt(hex.slice(4, 6), 16);
 
-        // part.color hex → RGB
-        const hex = part.color.replace('#', '');
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
-
-        for (let i = 0; i < maskData.data.length; i += 4) {
-          if (maskData.data[i] > 128) {         // 마스크 ON 픽셀
-            overlay.data[i]     = r;
-            overlay.data[i + 1] = g;
-            overlay.data[i + 2] = b;
-            overlay.data[i + 3] = 140;          // 반투명 오버레이
+          for (let i = 0; i < maskPx.data.length; i += 4) {
+            if (maskPx.data[i] > 128) {
+              overlay.data[i]     = r;
+              overlay.data[i + 1] = g;
+              overlay.data[i + 2] = b;
+              overlay.data[i + 3] = 150;
+            }
           }
-        }
-        ctx.putImageData(overlay, 0, 0);
-      };
-      maskImg.src = `data:image/png;base64,${maskB64}`;
-    });
+
+          // 오프스크린에 overlay 얹은 뒤 메인 캔버스에 합성 (이전 마스크 위에 누적)
+          offCtx.putImageData(overlay, 0, 0);
+          ctx.drawImage(off, 0, 0);   // putImageData 대신 drawImage → 누적 합성
+          resolve();
+        };
+        maskImg.onerror = () => resolve();
+        maskImg.src = `data:image/png;base64,${maskB64}`;
+      });
+    }
   };
 
   const handleMaskToggle = async (checked: boolean) => {
