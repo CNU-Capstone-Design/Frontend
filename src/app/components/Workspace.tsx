@@ -110,7 +110,7 @@ export function Workspace() {
 
     if (!showMasks || !segmentMasks) return;
 
-    const partsToShow = faceParts.filter(p => p.selected || p.id === selectedPart);
+    const partsToShow = faceParts.filter(p => p.selected);
 
     for (const part of partsToShow) {
       const regionName = PART_TO_REGION[part.id];
