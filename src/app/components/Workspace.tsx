@@ -42,6 +42,8 @@ export function Workspace() {
   const [originalImage, setOriginalImage] = useState<string>('');
   const [resultImage, setResultImage] = useState<string>('');
   const [imageId, setImageId] = useState<string | null>(null);
+  /** FFHQ-aligned 이미지 ID (segment 마스크 호출용) — null 이면 imageId 로 fallback */
+  const [alignedImageId, setAlignedImageId] = useState<string | null>(null);
   const [faceParts, setFaceParts] = useState<FacePart[]>(
     FACE_PARTS.map(part => ({ ...part, selected: false }))
   );
@@ -70,6 +72,8 @@ export function Workspace() {
           setResultImage(sim.resultImage);
           setFaceParts(sim.faceParts);
           setModifications(sim.modifications);
+          if (sim.imageId)        setImageId(sim.imageId);
+          if (sim.alignedImageId) setAlignedImageId(sim.alignedImageId);
           setShowUploadDialog(false);
         }
       });
@@ -159,11 +163,14 @@ export function Workspace() {
 
   const handleMaskToggle = async (checked: boolean) => {
     setShowMasks(checked);
-    if (!checked || !imageId || segmentMasks) return;
+    if (!checked || segmentMasks) return;
+    // alignedImageId 우선 사용 — FFHQ-aligned 이미지 기준 마스크 (표시 이미지와 일치)
+    const maskTargetId = alignedImageId ?? imageId;
+    if (!maskTargetId) return;
 
     setIsFetchingMasks(true);
     try {
-      const res = await api.get<{ masks: Record<string, string> }>(`/images/${imageId}/segment`);
+      const res = await api.get<{ masks: Record<string, string> }>(`/images/${maskTargetId}/segment`);
       setSegmentMasks(res.masks);
     } catch (err: any) {
       toast.error(err.message ?? '마스크를 불러올 수 없습니다. 인퍼런스 서버가 켜져 있는지 확인하세요.');
@@ -191,27 +198,33 @@ export function Workspace() {
     setIsProcessing(true);
 
     try {
-      // 1. 백엔드에 업로드 (EXIF 보정 후 저장됨)
+      // 1. 백엔드에 업로드 (EXIF 보정 후 저장 + FFHQ-aligned 이미지 생성)
       const formData = new FormData();
       formData.append('file', pendingFile);
-      const res = await api.upload<{ image_id: string }>('/images/upload', formData);
+      const res = await api.upload<{ image_id: string; aligned_image_id: string | null }>(
+        '/images/upload', formData
+      );
       setImageId(res.image_id);
+      setAlignedImageId(res.aligned_image_id ?? null);
+      // 마스크 캐시 초기화 (새 이미지이므로)
+      setSegmentMasks(null);
 
-      // 2. 백엔드에서 보정된 이미지 받아오기 (EXIF 제거된 버전)
-      const imageRes = await api.get<{ data_url: string }>(`/images/${res.image_id}/base64`);
-      const correctedImageData = imageRes.data_url;
+      // 2. FFHQ-aligned 이미지 받아오기 (있으면 우선 사용, 없으면 원본 EXIF 보정본)
+      const displayId = res.aligned_image_id ?? res.image_id;
+      const imageRes = await api.get<{ data_url: string }>(`/images/${displayId}/base64`);
+      const displayImageData = imageRes.data_url;
 
-      // 3. 얼굴 파싱
-      const result = await parseFace(correctedImageData);
+      // 3. 얼굴 파싱 (mockAI — 기본 검증용)
+      const result = await parseFace(displayImageData);
       if (!result.success) {
         setErrorMessage(result.message || '얼굴을 인식할 수 없습니다.');
         setShowErrorDialog(true);
         return;
       }
 
-      // 4. 보정된 이미지로 화면 표시
-      setOriginalImage(correctedImageData);
-      setResultImage(correctedImageData);
+      // 4. FFHQ-aligned 이미지로 화면 표시
+      setOriginalImage(displayImageData);
+      setResultImage(displayImageData);
       setShowUploadDialog(false);
       setPendingFile(null);
       toast.success('얼굴 파싱이 완료되었습니다');
@@ -336,14 +349,16 @@ export function Workspace() {
       id: simulation?.id || `sim_${Date.now()}`,
       name: simulation?.name || `시뮬레이션 ${new Date().toLocaleDateString('ko-KR')}`,
       createdAt: simulation?.createdAt || new Date(),
-      originalImage,
-      resultImage,
+      originalImage,   // before: FFHQ-aligned 이미지
+      resultImage,     // after:  AI 생성 결과 이미지
       faceParts,
       modifications,
+      imageId:        imageId ?? undefined,
+      alignedImageId: alignedImageId ?? undefined,
     };
 
     try {
-      await saveSimulation(newSimulation, imageId ?? undefined);
+      await saveSimulation(newSimulation, imageId ?? undefined, alignedImageId ?? undefined);
       toast.success('시뮬레이션이 저장되었습니다');
       navigate('/');
     } catch (err: any) {

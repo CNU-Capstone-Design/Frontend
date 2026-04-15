@@ -2,10 +2,16 @@ export interface Simulation {
   id: string;
   name: string;
   createdAt: Date;
+  /** FFHQ-aligned 이미지 (before) */
   originalImage: string;
+  /** AI 생성 결과 이미지 (after) */
   resultImage: string;
   faceParts: FacePart[];
   modifications: Modification[];
+  /** 원본 이미지 ID (preview 호출용) */
+  imageId?: string;
+  /** FFHQ-aligned 이미지 ID (segment 마스크용) */
+  alignedImageId?: string;
 }
 
 export interface FacePart {
