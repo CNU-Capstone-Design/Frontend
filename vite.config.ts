@@ -16,7 +16,8 @@ export default defineConfig({
   // --- 여기서부터 추가 ---
   server: {
     allowedHosts: [
-      'unidealistic-synthia-cataclysmically.ngrok-free.dev'
+      'sungyoon.dev',
+      'www.sungyoon.dev',
     ],
     proxy: {
       '/api': {
